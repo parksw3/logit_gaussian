@@ -1,0 +1,8 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.sty
+*.log
+*.gz
+*-concordance.tex

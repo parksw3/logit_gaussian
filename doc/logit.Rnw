@@ -1,0 +1,207 @@
+\documentclass{article}
+
+\title{Multivariate logistic distribution}
+
+\usepackage{amsmath}
+
+\usepackage{natbib}
+\bibliographystyle{chicago}
+
+\begin{document}
+
+\maketitle
+
+\section{Probit and multivariate logit model}
+
+We are interested in modeling multivariate binary outcomes ($n$ observations and $k$ response variables). 
+One way to model this is to use a probit model (this is suggested in the Stan manual; it is different from the mixed model trick but I'll get to that later):
+\begin{equation}
+\begin{aligned}
+y_{n,k} &= 1(z_{n,k} > 1)\\
+z_{n} &= x_n \beta + \epsilon_{n}\\
+\epsilon_{n} &\sim \mathrm{N}(0, R)
+\end{aligned}
+\end{equation}
+where $R$ is a correlation matrix (with 1's on the diagonals).
+While this is a convenient way of modeling multivariate binary outcomes, its parameters are difficult to interpret. Instead, the multivariate logistic regression model proposed by \cite{o2004bayesian} allows marginal distributions to follow a logistic distribution; the parameters of this model can be easily translated to odds ratio:
+\begin{equation}
+\begin{aligned}
+y_{n,k} &= 1(z_{n,k} > 1)\\
+z_{n} &= x_n \beta + \log[F_\nu(e_n)/\{1 - F_\nu(e_n)\}]\\
+e_n &\sim \mathrm{t}(0, \nu, R)
+\end{aligned}
+\end{equation}
+where $F_\nu$ is the cumulative distribution function of a univariate $t$ distribution with $\nu$ degrees of freedom and $t(0, \nu, R)$ is a multivariate $t$ distribution with $\nu$ degrees of freedom, mean 0, and covariance $R$.
+Again, to avoid identifiability issues, $R$ is constrained to have 1's on the diagonals (so it's essentially a correlation matrix).
+Sampling directly from this distribution is not trivial (Stan doesn't provide inverse function of CDF of a univariate $t$ distribution); instead, we can use the approximation propsed by \cite{o2004bayesian} and apply importance sampling to get to the correct posterior. 
+Specifically, the distribution of $z_n$ can be approximated by a multivariate $t$-distribution with mean $x_n\beta$, variance $\tilde \sigma^2 = \pi^2 (\nu - 2)/3 \nu$ (``a value chosen to make the variances of the univariate t and logistic distributions equal''), and $\tilde \nu = 7.3$ degrees of freedom (``a value chosen to minimize the integrated squared distance between the univariate t and univariate logistic densities'').
+
+Let's try some examples. We simulate 500 observations using (2) with intercepts only $\beta = (-1, 0, 1)$ and following correlation matrix:
+$$
+R = \begin{pmatrix}
+1 & 0.1 & 0.3\\
+0.1 & 1 & -0.5\\
+0.3 & -0.5 & 1
+\end{pmatrix}.
+$$
+This is what the data looks like:
+<<>>=
+load("../data/logit_t_intercept_only.rda")
+
+head(simulate_dd)
+@
+
+Then, I fit model (1) and model (2) to this data. First, looking at model (1):
+<<>>=
+load("../analysis/logit_t_intercept_only_logit_gaussian.rda")
+
+ee <- rstan::extract(fit)
+@
+
+Looking at estimates of $\beta$ (intercepts):
+<<>>=
+data.frame(
+	median=apply(ee$beta, 2, median),
+	lwr=apply(ee$beta, 2, quantile, 0.025),
+	upr=apply(ee$beta, 2, quantile, 0.975)
+)
+@
+These are quite different from the $\beta$ that I simulated with because the logit-normal doesn't preserve the marginal logit property. Interpreting each $\beta$ as log-odds will be misleading. For example, these are ``estimated'' odds ratioes (naively assuming that these $\beta$ estiamtes are log-odds):
+<<>>=
+data.frame(
+	median=exp(apply(ee$beta, 2, median)),
+	lwr=exp(apply(ee$beta, 2, quantile, 0.025)),
+	upr=exp(apply(ee$beta, 2, quantile, 0.975))
+)
+@
+The observed odds ratios are quite different:
+<<>>==
+apply(simulate_dd, 2, mean)/(1-apply(simulate_dd, 2, mean))
+@
+Can we at least get correlation right?
+<<>>=
+apply(ee$Omega, 2:3, median)
+apply(ee$Omega, 2:3, quantile, 0.025)
+apply(ee$Omega, 2:3, quantile, 0.975)
+@
+Seems like we're doing OK in terms of estimating the correlation.
+
+Let's look at the estimates from the multivariate logisti regression model:
+<<>>==
+load("../analysis/logit_t_intercept_only_logit_t.rda")
+
+ee <- rstan::extract(fit)
+@
+
+Note that we have to take weighted quantiles this time. Look at estimates of $\beta$:
+<<>>=
+## wquant from King et al.
+wquant <- function (x, weights, probs = c(0.025, 0.975)) {
+    which <- !is.na(weights)
+    x <- x[which]
+    weights <- weights[which]
+
+    if (all(is.na(x)) || length(x) == 0) return(rep(NA, length(probs)))
+
+    idx <- order(x)
+    x <- x[idx]
+    weights <- weights[idx]
+    w <- cumsum(weights)/sum(weights)
+    rval <- approx(w,x,probs,rule=1)
+    rval$y
+}
+
+data.frame(
+	median=apply(ee$beta, 2, wquant, weights=weights, probs=0.5),
+	lwr=apply(ee$beta, 2, wquant, weights=weights, probs=0.025),
+	upr=apply(ee$beta, 2, wquant, weights=weights, probs=0.975)
+)
+@
+These estimates match with the true values. Moreover, the estimates of odds ratios match with the observed odds (kind of obvious but just checking it):
+
+<<>>=
+data.frame(
+	median=exp(apply(ee$beta, 2, wquant, weights=weights, probs=0.5)),
+	lwr=exp(apply(ee$beta, 2, wquant, weights=weights, probs=0.025)),
+	upr=exp(apply(ee$beta, 2, wquant, weights=weights, probs=0.975))
+)
+@
+
+Correlations look reasonable:
+<<>>=
+apply(ee$Omega, 2:3, wquant, weights=weights, probs=0.5)
+apply(ee$Omega, 2:3, wquant, weights=weights, probs=0.025)
+apply(ee$Omega, 2:3, wquant, weights=weights, probs=0.975)
+@
+
+\section{Improving probit model}
+
+\cite{o2004bayesian} suggests using a t distribution for approximating the multivariate logit distribution but we can also use the probit model. Instead of using (1), we can rewrite it as 
+\begin{equation}
+\begin{aligned}
+y_{n,k} &= 1(z_{n,k} > 1)\\
+z_{n} &= x_n \beta + \epsilon_{n}\\
+\epsilon_{n} &\sim \mathrm{N}(0, \sigma^2 R)
+\end{aligned}
+\end{equation}
+where $R$ is a correlation matrix and $\sigma^2 = \pi^2/3$. This allows the marginal distribution of $z_n$ to have same variance as a standard logistic distribution. We fit this model to the simulated data above:
+<<>>=
+load("../analysis/logit_t_intercept_only_logit_gaussian2.rda")
+
+ee <- rstan::extract(fit)
+@
+Looking at estimates of $\beta$:
+<<>>=
+data.frame(
+	median=apply(ee$beta, 2, median),
+	lwr=apply(ee$beta, 2, quantile, 0.025),
+	upr=apply(ee$beta, 2, quantile, 0.975)
+)
+@
+This matches the true value much better. Converting these to odds ratios is consistent with the observed odds ratios.
+<<>>=
+data.frame(
+	median=exp(apply(ee$beta, 2, median)),
+	lwr=exp(apply(ee$beta, 2, quantile, 0.025)),
+	upr=exp(apply(ee$beta, 2, quantile, 0.975))
+)
+@
+Correlations look good too:
+
+<<>>=
+apply(ee$Omega, 2:3, median)
+apply(ee$Omega, 2:3, quantile, 0.025)
+apply(ee$Omega, 2:3, quantile, 0.975)
+@
+
+We should be able to apply importance sampling over this to make better inference but I'm not going to try it here...
+
+\section{Mixed model approach}
+
+We can also use the mixed model trick to model multivariate binary outcomes. Then, our model becomes
+\begin{equation}
+\begin{aligned}
+\textrm{logit Pr}(Y_n = y_n) &= x_n \beta + \epsilon_n\\
+\epsilon_n &\sim \mathrm{N}(0, \Sigma)
+\end{aligned}
+\end{equation}
+I think this model is equivalent (???) to letting 
+\begin{equation}
+\begin{aligned}
+y_{n,k} &= 1(z_{n,k} > 1)\\
+z_{n,k} &\sim \mathcal L(\cdot | x_{n} \beta_k + \epsilon_n) \\
+\epsilon_n &\sim \mathrm{N}(0, \Sigma),
+\end{aligned}
+\end{equation}
+where $\mathcal L()$ represents the standard logistic distribution.
+The major ``problem'' with this model is that the underlying distribution of $z$ is overdispersed compared to the standard logistic distribution. 
+This means that the estimates of $\beta$ are not going to represent log-odds.
+So we need a way to shrink the distribution with something like importance sampling.
+
+
+
+
+
+\bibliography{logit}
+
+\end{document}
