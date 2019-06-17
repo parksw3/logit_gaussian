@@ -67,7 +67,7 @@ We are interested in modeling multivariate binary outcomes ($n$ observations and
 One way to model this is to use a probit model (this is suggested in the Stan manual; it is different from the mixed model trick but I'll get to that later):
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 1)\\
+y_{n,k} &= 1(z_{n,k} > 0)\\
 z_{n} &= x_n \beta + \epsilon_{n}\\
 \epsilon_{n} &\sim \mathrm{N}(0, R)
 \end{aligned}
@@ -76,7 +76,7 @@ where $R$ is a correlation matrix (with 1's on the diagonals).
 While this is a convenient way of modeling multivariate binary outcomes, its parameters are difficult to interpret. Instead, the multivariate logistic regression model proposed by \cite{o2004bayesian} allows marginal distributions to follow a logistic distribution; the parameters of this model can be easily translated to odds ratio:
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 1)\\
+y_{n,k} &= 1(z_{n,k} > 0)\\
 z_{n} &= x_n \beta + \log[F_\nu(e_n)/\{1 - F_\nu(e_n)\}]\\
 e_n &\sim \mathrm{t}(0, \nu, R)
 \end{aligned}
@@ -316,7 +316,7 @@ Correlations look reasonable:
 \cite{o2004bayesian} suggests using a t distribution for approximating the multivariate logit distribution but we can also use the probit model. Instead of using (1), we can rewrite it as 
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 1)\\
+y_{n,k} &= 1(z_{n,k} > 0)\\
 z_{n} &= x_n \beta + \epsilon_{n}\\
 \epsilon_{n} &\sim \mathrm{N}(0, \sigma^2 R)
 \end{aligned}
@@ -418,7 +418,7 @@ We can also use the mixed model trick to model multivariate binary outcomes. The
 I think this model is equivalent (???) to letting 
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 1)\\
+y_{n,k} &= 1(z_{n,k} > 0)\\
 z_{n,k} &\sim \mathcal L(x_{n} \beta_k + \epsilon_n) \\
 \epsilon_n &\sim \mathrm{N}(0, \sigma^2 R),
 \end{aligned}
@@ -453,6 +453,97 @@ $$
 s =  \sqrt{1 + \frac{3}{\pi^2}}
 $$
 I think we can use this scale to scale the parameter estimates into the ``correct'' scale but I'm having some computational issues with model (4) even if I fix the variance parameter. It seems like it's harder to estimate correlation matrices... I suspect that the overdispersion makes things harder (unless I'm doing something wrong)...?
+
+\subsection{Checking mixed model ``theory'' for univariate cases}
+
+We can test some ideas on a univariate scale and then move to multivariate scale. 
+First, let's show that (4) and (5) are equivalent using simulations:
+
+\begin{knitrout}
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
+\hlkwd{set.seed}\hlstd{(}\hlnum{101}\hlstd{)}
+\hlstd{nobs} \hlkwb{<-} \hlnum{100000}
+\hlstd{muvec} \hlkwb{<-} \hlstd{(}\hlopt{-}\hlnum{4}\hlstd{)}\hlopt{:}\hlnum{4}
+\hlkwd{sapply}\hlstd{(muvec,} \hlkwa{function}\hlstd{(}\hlkwc{x}\hlstd{) \{}
+        \hlstd{rr1} \hlkwb{<-} \hlkwd{rbinom}\hlstd{(nobs,} \hlnum{1}\hlstd{,} \hlkwd{plogis}\hlstd{(x} \hlopt{+} \hlkwd{rnorm}\hlstd{(nobs,} \hlnum{0}\hlstd{,} \hlnum{1}\hlstd{)))}
+        \hlstd{rr2} \hlkwb{<-} \hlkwd{as.numeric}\hlstd{(}\hlkwd{rlogis}\hlstd{(nobs,} \hlkwc{location}\hlstd{=x} \hlopt{+} \hlkwd{rnorm}\hlstd{(nobs,} \hlnum{0}\hlstd{,} \hlnum{1}\hlstd{))} \hlopt{>} \hlnum{0}\hlstd{)}
+        \hlkwd{mean}\hlstd{(rr1)} \hlopt{-} \hlkwd{mean}\hlstd{(rr2)}
+\hlstd{\})}
+\end{alltt}
+\begin{verbatim}
+## [1] -0.00005  0.00221  0.00088  0.00459  0.00258 -0.00315 -0.00073  0.00107
+## [9]  0.00042
+\end{verbatim}
+\end{kframe}
+\end{knitrout}
+Looks like it works. We also want to know if we can approximately go from this logit-gaussian parameter scale to log odds scale.
+The idea is to approximate this compound logit-gaussian distribution with logistic distribution with different variance. 
+I think we want to find $\hat \beta$ such that:
+\begin{equation}
+E[1 (z > 0)] = \frac{1}{1 + \exp(-\hat \beta)}.
+\end{equation}
+given the underlying distribution of $z$. When $z$ follows a standard logistic distribution, $\hat \beta$ corresponds to the location parameter of the logistic distribution of $z$.
+When $z$ has a non-unit scale, we have
+\begin{equation}
+E[1 (z > 0)] = \frac{1}{1 + \exp(-\mu/s)}
+\end{equation}
+so $\hat \beta = \mu/s$, where $s$ is a scale parameter.
+
+In other words, if we use a mixed model trick where the underlying variance is assumed to be $\sigma^2$, we can transform the parameter estimates by dividing by
+$$
+s =  \sqrt{1 + \frac{3\sigma^2}{\pi^2}}.
+$$
+This should (approximately) get us to the correct log-odds scale. Or we can even incorporate this value into our estimation process and apply importance sampling later (but this approximation seems good enough).
+
+\begin{knitrout}
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
+\hlcom{## mixed model mean probability}
+\hlkwd{mean}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{10000}\hlstd{,} \hlnum{2} \hlopt{+} \hlkwd{rnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlnum{1}\hlstd{))} \hlopt{>} \hlnum{0}\hlstd{)}
+\end{alltt}
+\begin{verbatim}
+## [1] 0.8462
+\end{verbatim}
+\begin{alltt}
+\hlcom{## approximation}
+\hlkwd{plogis}\hlstd{(}\hlnum{2}\hlopt{/}\hlkwd{sqrt}\hlstd{(}\hlnum{1} \hlopt{+} \hlnum{3}\hlopt{/}\hlstd{pi}\hlopt{^}\hlnum{2}\hlstd{))}
+\end{alltt}
+\begin{verbatim}
+## [1] 0.8521354
+\end{verbatim}
+\begin{alltt}
+\hlcom{## same example with different underlying variance of a normal distribution}
+\hlcom{## mixed model mean probability}
+\hlkwd{mean}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{10000}\hlstd{,} \hlnum{2} \hlopt{+} \hlkwd{rnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlnum{2}\hlstd{))} \hlopt{>} \hlnum{0}\hlstd{)}
+\end{alltt}
+\begin{verbatim}
+## [1] 0.7767
+\end{verbatim}
+\begin{alltt}
+\hlcom{## approximation}
+\hlkwd{plogis}\hlstd{(}\hlnum{2}\hlopt{/}\hlkwd{sqrt}\hlstd{(}\hlnum{1} \hlopt{+} \hlnum{4} \hlopt{*} \hlnum{3}\hlopt{/}\hlstd{pi}\hlopt{^}\hlnum{2}\hlstd{))}
+\end{alltt}
+\begin{verbatim}
+## [1] 0.793076
+\end{verbatim}
+\end{kframe}
+\end{knitrout}
+
+These distributions are slightly different (which explains why the approximation doesn't work exactly)...
+
+\begin{knitrout}
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
+\hlkwd{plot}\hlstd{(}\hlkwd{density}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{10000}\hlstd{,} \hlnum{2} \hlopt{+} \hlkwd{rnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlnum{2}\hlstd{))))}
+\hlkwd{curve}\hlstd{(}\hlkwd{dlogis}\hlstd{(x,} \hlnum{2}\hlstd{,} \hlkwc{scale}\hlstd{=}\hlkwd{sqrt}\hlstd{(}\hlnum{1} \hlopt{+} \hlnum{4} \hlopt{*} \hlnum{3}\hlopt{/}\hlstd{pi}\hlopt{^}\hlnum{2}\hlstd{)),} \hlkwc{add}\hlstd{=}\hlnum{TRUE}\hlstd{,} \hlkwc{col}\hlstd{=}\hlnum{2}\hlstd{)}
+\hlkwd{curve}\hlstd{(}\hlkwd{dnorm}\hlstd{(x,} \hlnum{2}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlkwd{sqrt}\hlstd{(pi}\hlopt{^}\hlnum{2}\hlopt{/}\hlnum{3} \hlopt{+} \hlnum{4}\hlstd{)),} \hlkwc{add}\hlstd{=}\hlnum{TRUE}\hlstd{,} \hlkwc{col}\hlstd{=}\hlnum{3}\hlstd{)}
+\end{alltt}
+\end{kframe}
+\includegraphics[width=\maxwidth]{figure/unnamed-chunk-18-1} 
+
+\end{knitrout}
+
 
 \bibliography{logit}
 
