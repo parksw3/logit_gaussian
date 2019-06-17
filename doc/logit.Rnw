@@ -189,18 +189,33 @@ I think this model is equivalent (???) to letting
 \begin{equation}
 \begin{aligned}
 y_{n,k} &= 1(z_{n,k} > 1)\\
-z_{n,k} &\sim \mathcal L(\cdot | x_{n} \beta_k + \epsilon_n) \\
-\epsilon_n &\sim \mathrm{N}(0, \Sigma),
+z_{n,k} &\sim \mathcal L(x_{n} \beta_k + \epsilon_n) \\
+\epsilon_n &\sim \mathrm{N}(0, \sigma^2 R),
 \end{aligned}
 \end{equation}
-where $\mathcal L()$ represents the standard logistic distribution.
+where $\mathcal L()$ represents the standard logistic distribution and $\sigma^2 = 1$.
 The major ``problem'' with this model is that the underlying distribution of $z$ is overdispersed compared to the standard logistic distribution. 
 This means that the estimates of $\beta$ are not going to represent log-odds.
-So we need a way to shrink the distribution with something like importance sampling.
+So we need a way to shrink the distribution ??? or adjust the posterior using importance sampling.
+Or just use the first two models... Importance sampling is not going to work well because the posterior we get from this is going to be fairly different from the posterior we want.
 
+Let's try to think of an approximation, assuming that the second model is equivalent to the first model (I'll check this later...).
+Note that the underlying distribution of $z$ is a compound distribution between a logistic distribution and a normal distribution. Then, the variance of $z$ is given by
+$$
+\mathrm{Var}(Z) = \mathrm{E}_N(\mathrm{Var}_L(Z|\mu + \epsilon)) + \mathrm{Var}_N(\mathrm{E}_L(Z|\mu + \epsilon)) = \frac{\pi^2}{3} + 1 \approx 4.29,
+$$
+which is the sum of variance of the logistic distribution and the underlying normal.
+We can confirm this using a small simulation:
+<<>>=
+set.seed(101)
+var(rlogis(1000000, location=rnorm(1000000)))
+@
 
-
-
+Then, we can approximate the marginal distribution of $z$ with logistic distribution with scale 
+$$
+s =  \sqrt{1 + \frac{3}{\pi^2}}
+$$
+I think we can use this scale to scale the parameter estimates into the ``correct'' scale but I'm having some computational issues with model (4) even if I fix the variance parameter. It seems like it's harder to estimate correlation matrices... I suspect that the overdispersion makes things harder (unless I'm doing something wrong)...?
 
 \bibliography{logit}
 

@@ -69,27 +69,26 @@ One way to model this is to use a probit model (this is suggested in the Stan ma
 \begin{aligned}
 y_{n,k} &= 1(z_{n,k} > 1)\\
 z_{n} &= x_n \beta + \epsilon_{n}\\
-\epsilon_{n} &\sim \mathrm{N}(0, \Sigma)
+\epsilon_{n} &\sim \mathrm{N}(0, R)
 \end{aligned}
 \end{equation}
-where $\Sigma$ is a covariance matrix. 
-To avoid identifiability issues, $\Sigma$ is constrained to have 1's on the diagonals.
+where $R$ is a correlation matrix (with 1's on the diagonals).
 While this is a convenient way of modeling multivariate binary outcomes, its parameters are difficult to interpret. Instead, the multivariate logistic regression model proposed by \cite{o2004bayesian} allows marginal distributions to follow a logistic distribution; the parameters of this model can be easily translated to odds ratio:
 \begin{equation}
 \begin{aligned}
 y_{n,k} &= 1(z_{n,k} > 1)\\
 z_{n} &= x_n \beta + \log[F_\nu(e_n)/\{1 - F_\nu(e_n)\}]\\
-e_n &\sim \mathrm{t}(0, \nu, \Sigma)
+e_n &\sim \mathrm{t}(0, \nu, R)
 \end{aligned}
 \end{equation}
-where $F_\nu$ is the cumulative distribution function of a univariate $t$ distribution with $\nu$ degrees of freedom and $t(0, \nu, \Sigma)$ is a multivariate $t$ distribution with $\nu$ degrees of freedom, mean 0, and covariance $\Sigma$.
-Again, to avoid identifiability issues, $\Sigma$ is constrained to have 1's on the diagonals.
+where $F_\nu$ is the cumulative distribution function of a univariate $t$ distribution with $\nu$ degrees of freedom and $t(0, \nu, R)$ is a multivariate $t$ distribution with $\nu$ degrees of freedom, mean 0, and covariance $R$.
+Again, to avoid identifiability issues, $R$ is constrained to have 1's on the diagonals (so it's essentially a correlation matrix).
 Sampling directly from this distribution is not trivial (Stan doesn't provide inverse function of CDF of a univariate $t$ distribution); instead, we can use the approximation propsed by \cite{o2004bayesian} and apply importance sampling to get to the correct posterior. 
 Specifically, the distribution of $z_n$ can be approximated by a multivariate $t$-distribution with mean $x_n\beta$, variance $\tilde \sigma^2 = \pi^2 (\nu - 2)/3 \nu$ (``a value chosen to make the variances of the univariate t and logistic distributions equal''), and $\tilde \nu = 7.3$ degrees of freedom (``a value chosen to minimize the integrated squared distance between the univariate t and univariate logistic densities'').
 
-Let's try some examples. We simulate 500 observations using (2) with intercepts only $\beta = (-1, 0, 1)$ and following correlation (covariance) matrix:
+Let's try some examples. We simulate 500 observations using (2) with intercepts only $\beta = (-1, 0, 1)$ and following correlation matrix:
 $$
-\Sigma = \begin{pmatrix}
+R = \begin{pmatrix}
 1 & 0.1 & 0.3\\
 0.1 & 1 & -0.5\\
 0.3 & -0.5 & 1
@@ -319,10 +318,10 @@ Correlations look reasonable:
 \begin{aligned}
 y_{n,k} &= 1(z_{n,k} > 1)\\
 z_{n} &= x_n \beta + \epsilon_{n}\\
-\epsilon_{n} &\sim \mathrm{N}(0, \sigma^2 \Sigma)
+\epsilon_{n} &\sim \mathrm{N}(0, \sigma^2 R)
 \end{aligned}
 \end{equation}
-where $\Sigma$ is a correlation matrix and $\sigma^2 = \pi^2/3$. This allows the marginal distribution of $z_n$ to have same variance as a standard logistic distribution. We fit this model to the simulated data above:
+where $R$ is a correlation matrix and $\sigma^2 = \pi^2/3$. This allows the marginal distribution of $z_n$ to have same variance as a standard logistic distribution. We fit this model to the simulated data above:
 \begin{knitrout}
 \definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
 \begin{alltt}
@@ -368,14 +367,92 @@ This matches the true value much better. Converting these to odds ratios is cons
 \end{verbatim}
 \end{kframe}
 \end{knitrout}
+Correlations look good too:
+
+\begin{knitrout}
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
+\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, median)}
+\end{alltt}
+\begin{verbatim}
+##       
+##             [,1]       [,2]       [,3]
+##   [1,] 1.0000000  0.1206049  0.2337311
+##   [2,] 0.1206049  1.0000000 -0.4334244
+##   [3,] 0.2337311 -0.4334244  1.0000000
+\end{verbatim}
+\begin{alltt}
+\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, quantile,} \hlnum{0.025}\hlstd{)}
+\end{alltt}
+\begin{verbatim}
+##       
+##               [,1]       [,2]        [,3]
+##   [1,]  1.00000000 -0.0127358  0.07630079
+##   [2,] -0.01273580  1.0000000 -0.55051889
+##   [3,]  0.07630079 -0.5505189  1.00000000
+\end{verbatim}
+\begin{alltt}
+\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, quantile,} \hlnum{0.975}\hlstd{)}
+\end{alltt}
+\begin{verbatim}
+##       
+##             [,1]       [,2]       [,3]
+##   [1,] 1.0000000  0.2513424  0.3790616
+##   [2,] 0.2513424  1.0000000 -0.3140738
+##   [3,] 0.3790616 -0.3140738  1.0000000
+\end{verbatim}
+\end{kframe}
+\end{knitrout}
+
 We should be able to apply importance sampling over this to make better inference but I'm not going to try it here...
 
 \section{Mixed model approach}
 
 We can also use the mixed model trick to model multivariate binary outcomes. Then, our model becomes
 \begin{equation}
-\textrm{logit Pr}()
+\begin{aligned}
+\textrm{logit Pr}(Y_n = y_n) &= x_n \beta + \epsilon_n\\
+\epsilon_n &\sim \mathrm{N}(0, \Sigma)
+\end{aligned}
 \end{equation}
+I think this model is equivalent (???) to letting 
+\begin{equation}
+\begin{aligned}
+y_{n,k} &= 1(z_{n,k} > 1)\\
+z_{n,k} &\sim \mathcal L(x_{n} \beta_k + \epsilon_n) \\
+\epsilon_n &\sim \mathrm{N}(0, \Sigma),
+\end{aligned}
+\end{equation}
+where $\mathcal L()$ represents the standard logistic distribution.
+The major ``problem'' with this model is that the underlying distribution of $z$ is overdispersed compared to the standard logistic distribution. 
+This means that the estimates of $\beta$ are not going to represent log-odds.
+So we need a way to shrink the distribution ??? or adjust the posterior using importance sampling.
+Or just use the first two models... Importance sampling is not going to work well because the posterior we get from this is going to be fairly different from the posterior we want.
+
+Let's try to think of an approximation, assuming that the second model is equivalent to the first model (I'll check this later...).
+Note that the underlying distribution of $z$ is a compound distribution between a logistic distribution and a normal distribution. Then, the variance of $z$ is given by
+$$
+\mathrm{Var}(Z) = \mathrm{E}_N(\mathrm{Var}_L(Z|\mu + \epsilon)) + \mathrm{Var}_N(\mathrm{E}_L(Z|\mu + \epsilon)) = \frac{\pi^2}{3} + 1 \approx 4.29,
+$$
+which is the sum of variance of the logistic distribution and the underlying normal.
+We can confirm this using a small simulation:
+\begin{knitrout}
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+\begin{alltt}
+\hlkwd{set.seed}\hlstd{(}\hlnum{101}\hlstd{)}
+\hlkwd{var}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{1000000}\hlstd{,} \hlkwc{location}\hlstd{=}\hlkwd{rnorm}\hlstd{(}\hlnum{1000000}\hlstd{)))}
+\end{alltt}
+\begin{verbatim}
+## [1] 4.291188
+\end{verbatim}
+\end{kframe}
+\end{knitrout}
+
+Then, we can approximate the marginal distribution of $z$ with logistic distribution with scale 
+$$
+s =  \sqrt{1 + \frac{3}{\pi^2}}
+$$
+
 
 
 \bibliography{logit}
