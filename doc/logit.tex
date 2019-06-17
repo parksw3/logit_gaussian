@@ -420,10 +420,10 @@ I think this model is equivalent (???) to letting
 \begin{aligned}
 y_{n,k} &= 1(z_{n,k} > 1)\\
 z_{n,k} &\sim \mathcal L(x_{n} \beta_k + \epsilon_n) \\
-\epsilon_n &\sim \mathrm{N}(0, \Sigma),
+\epsilon_n &\sim \mathrm{N}(0, \sigma^2 R),
 \end{aligned}
 \end{equation}
-where $\mathcal L()$ represents the standard logistic distribution.
+where $\mathcal L()$ represents the standard logistic distribution and $\sigma^2 = 1$.
 The major ``problem'' with this model is that the underlying distribution of $z$ is overdispersed compared to the standard logistic distribution. 
 This means that the estimates of $\beta$ are not going to represent log-odds.
 So we need a way to shrink the distribution ??? or adjust the posterior using importance sampling.
@@ -452,8 +452,7 @@ Then, we can approximate the marginal distribution of $z$ with logistic distribu
 $$
 s =  \sqrt{1 + \frac{3}{\pi^2}}
 $$
-
-
+I think we can use this scale to scale the parameter estimates into the ``correct'' scale but I'm having some computational issues with model (4) even if I fix the variance parameter. It seems like it's harder to estimate correlation matrices... I suspect that the overdispersion makes things harder (unless I'm doing something wrong)...?
 
 \bibliography{logit}
 

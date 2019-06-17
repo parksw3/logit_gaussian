@@ -217,6 +217,42 @@ s =  \sqrt{1 + \frac{3}{\pi^2}}
 $$
 I think we can use this scale to scale the parameter estimates into the ``correct'' scale but I'm having some computational issues with model (4) even if I fix the variance parameter. It seems like it's harder to estimate correlation matrices... I suspect that the overdispersion makes things harder (unless I'm doing something wrong)...?
 
+\subsection{Checking mixed model ``theory'' for univariate cases}
+
+We can test some ideas on a univariate scale and then move to multivariate scale. 
+First, let's show that (4) and (5) are equivalent using simulations:
+
+<<>>=
+set.seed(101)
+nobs <- 100000
+muvec <- (-4):4
+sapply(muvec, function(x) {
+	rr1 <- rbinom(nobs, 1, plogis(x + rnorm(nobs, 0, 1))) 
+	rr2 <- as.numeric(rlogis(nobs, location=x + rnorm(nobs, 0, 1)) > 0)
+	mean(rr1) - mean(rr2)
+})
+@
+Looks like it works. We also want to know if we can approximately go from this logit-gaussian parameter scale to log odds scale.
+The idea is to approximate this compound logit-gaussian distribution with logistic distribution with different variance. 
+I think we want to find $\hat \beta$ such that:
+\begin{equation}
+E[1 (z > 0)] = \frac{1}{1 + \exp(-\hat \beta)}.
+\end{equation}
+given the underlying distribution of $z$. When $z$ follows a standard logistic distribution, $\hat \beta$ corresponds to the location parameter of the logistic distribution of $z$.
+When $z$ has a non-unit scale, we have
+\begin{equation}
+E[1 (z > 0)] = \frac{1}{1 + \exp(-\mu/s)}
+\end{equation}
+so $\hat \beta = \mu/s$, where $s$ is a scale parameter.
+
+In other words, if we use a mixed model trick where the underlying variance is assumed to be $\sigma^2$, we can transform the parameter estimates by dividing by
+$$
+s =  \sqrt{1 + \frac{3\sigma^2}{\pi^2}}.
+$$
+This should (approximately) get us to the correct log-odds scale. Or we can even incorporate this value into our estimation process and apply importance sampling later.
+
+
+
 \bibliography{logit}
 
 \end{document}
