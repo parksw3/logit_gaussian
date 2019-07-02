@@ -183,14 +183,14 @@ We can work out a numerical example. Assume $n_1 = 60$ and $n_0=40$. Then, the M
         \hlstd{ll}
 \hlstd{\}}
 
-\hlstd{muvec} \hlkwb{<-} \hlkwd{seq}\hlstd{(}\hlnum{0.35}\hlstd{,} \hlnum{1}\hlstd{,} \hlkwc{by}\hlstd{=}\hlnum{0.01}\hlstd{)}
+\hlstd{muvec} \hlkwb{<-} \hlkwd{seq}\hlstd{(}\hlnum{0.35}\hlstd{,} \hlnum{3}\hlstd{,} \hlkwc{by}\hlstd{=}\hlnum{0.05}\hlstd{)}
 \hlstd{sigmavec} \hlkwb{<-} \hlkwd{exp}\hlstd{(}\hlkwd{seq}\hlstd{(}\hlkwd{log}\hlstd{(}\hlnum{1}\hlstd{),} \hlkwd{log}\hlstd{(}\hlnum{10}\hlstd{),} \hlkwc{length.out}\hlstd{=}\hlnum{100}\hlstd{))}
 
 \hlkwd{contour}\hlstd{(muvec, sigmavec,} \hlkwd{apply2d}\hlstd{(llfun, muvec, sigmavec),}
                 \hlkwc{xlab}\hlstd{=}\hlkwd{expression}\hlstd{(mu),}
                 \hlkwc{ylab}\hlstd{=}\hlkwd{expression}\hlstd{(sigma),}
                 \hlkwc{main}\hlstd{=}\hlstr{"log (marginal) likelihood surface"}\hlstd{,}
-                \hlkwc{levels}\hlstd{=}\hlkwd{c}\hlstd{(}\hlopt{-}\hlnum{67.31}\hlstd{,} \hlopt{-}\hlnum{67.4}\hlstd{,} \hlopt{-}\hlnum{68}\hlstd{,} \hlnum{70}\hlstd{))}
+                \hlkwc{levels}\hlstd{=}\hlkwd{c}\hlstd{(}\hlopt{-}\hlnum{67.31}\hlstd{,} \hlopt{-}\hlnum{67.4}\hlstd{,} \hlopt{-}\hlnum{68}\hlstd{,} \hlopt{-}\hlnum{70}\hlstd{,} \hlopt{-}\hlnum{80}\hlstd{))}
 \end{alltt}
 \end{kframe}
 \includegraphics[width=\maxwidth]{figure/unnamed-chunk-1-1} 
