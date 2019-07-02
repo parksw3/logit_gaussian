@@ -11,266 +11,206 @@
 
 \maketitle
 
-\section{Probit and multivariate logit model}
+\section{Latent variable notation}
 
-We are interested in modeling multivariate binary outcomes ($n$ observations and $k$ response variables). 
-One way to model this is to use a probit model (this is suggested in the Stan manual; it is different from the mixed model trick but I'll get to that later):
+We are interested in modeling multivariate binomial outcomes. We will write the observed outcome as $\mathbf y_i = (y_{i1}, y_{i2}, \dots, y_{ip})'$, a vector of binary variables. To keep our notations consistent, we will model $\mathbf y_i$ using a latent variable approach:
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n} &= x_n \beta + \epsilon_{n}\\
-\epsilon_{n} &\sim \mathrm{N}(0, R)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathrm{distrib}(\mu, \Sigma^2).
 \end{aligned}
 \end{equation}
-where $R$ is a correlation matrix (with 1's on the diagonals).
-While this is a convenient way of modeling multivariate binary outcomes, its parameters are difficult to interpret. Instead, the multivariate logistic regression model proposed by \cite{o2004bayesian} allows marginal distributions to follow a logistic distribution; the parameters of this model can be easily translated to odds ratio:
+where $\mathbf z_i$ is a vector of continuous variable following a probability distribution with mean $\mu$ and covariance $\Sigma^2$.
+This approach generalizes the univariate logistic regression.
+
+\section{Models}
+
+\subsection{Logistic regression}
+
+First, consider the univariate logistic regression (with intercept only):
+\begin{equation}
+\textrm{logit Pr}(y_i = 1) = \mu.
+\end{equation}
+This is equivalent to writing
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n} &= x_n \beta + \log[F_\nu(e_n)/\{1 - F_\nu(e_n)\}]\\
-e_n &\sim \mathrm{t}(0, \nu, R)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathrm{logistic}(\mu, 1),
 \end{aligned}
 \end{equation}
-where $F_\nu$ is the cumulative distribution function of a univariate $t$ distribution with $\nu$ degrees of freedom and $t(0, \nu, R)$ is a multivariate $t$ distribution with $\nu$ degrees of freedom, mean 0, and covariance $R$.
-Again, to avoid identifiability issues, $R$ is constrained to have 1's on the diagonals (so it's essentially a correlation matrix).
-Sampling directly from this distribution is not trivial (Stan doesn't provide inverse function of CDF of a univariate $t$ distribution); instead, we can use the approximation propsed by \cite{o2004bayesian} and apply importance sampling to get to the correct posterior. 
-Specifically, the distribution of $z_n$ can be approximated by a multivariate $t$-distribution with mean $x_n\beta$, variance $\tilde \sigma^2 = \pi^2 (\nu - 2)/3 \nu$ (``a value chosen to make the variances of the univariate t and logistic distributions equal''), and $\tilde \nu = 7.3$ degrees of freedom (``a value chosen to minimize the integrated squared distance between the univariate t and univariate logistic densities'').
+where $\mathrm{logistic}(\cdot|\mu, s)$ is a logistic \emph{distribution} with location parameter $\mu$ and a scale parameter $s$.
 
-Let's try some examples. We simulate 500 observations using (2) with intercepts only $\beta = (-1, 0, 1)$ and following correlation matrix:
-$$
-R = \begin{pmatrix}
-1 & 0.1 & 0.3\\
-0.1 & 1 & -0.5\\
-0.3 & -0.5 & 1
-\end{pmatrix}.
-$$
-This is what the data looks like:
+One way to extend this model to account for multivariate observation is to use a mixed model approach: 
+\begin{equation}
+\begin{aligned}
+\textrm{logit Pr}(\mathbf Y_i = y_i) &= \pmb \mu + \mathbf r_i\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R),
+\end{aligned}
+\end{equation}
+where $\mathcal N(0, \sigma^2 R)$ is a multivariate normal distribution with covariance $\sigma^2 R$ ($R$ is the correlation matrix). For convenience, we assume that random effects variance $\sigma^2$ is constant among response variables.
+Equivalently, we can write this as
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathrm{logistic}(\pmb \mu + \mathbf r_i, 1)\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R),
+\end{aligned}
+\end{equation}
+which can be further expanded as 
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \mathbf r_i + \pmb \epsilon_i\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R)\\
+\epsilon_{ij} &\sim \mathrm{logistic}(0, 1)
+\end{aligned}
+\end{equation}
+Essentially, we have a continuous latent variable $\mathbf z_i$ which has a mean $\pmb \mu$ and two ``error'' terms: $\mathbf r_i$, which follows a multivariate normal with covariance $\sigma^2 R$, and $\pmb \epsilon_i$, which follows an independent logistic (each marginal distribution is an i.i.d. logistic distribution).
+Due to two levels of uncertainties, it becomes much harder to estimate the correlation structure $R$.
+I don't have a good analytical argument for this but I hope this is somewhat intuitive... I'll compare this with other models later; this might make things slightly clearer.
+
+\subsubsection*{Identifiability of the random effects variance}
+
+It doesn't seem like Jonathan is completely convinced that $\sigma^2$ is not identifiable; he says that it is ``practically'' unidentifiable. Let's try to do some math. Consider a univariate logistic regression with an underlying normal random effects on the mean:
+\begin{equation}
+\begin{aligned}
+y_i &= 1(z_i > 0)\\
+z_i &\sim \mathrm{logistic}(\mu + r_i, 1)\\
+r_i &\sim \mathcal{N}(0, \sigma^2)
+\end{aligned}
+\end{equation}
+Then, the marginal likelihood of this model can be written as 
+\begin{equation}
+\begin{aligned}
+\prod_{i=1}^{n} \int_{-\infty}^\infty \int_{-\infty}^\infty \left\{1(z_i>0)^{y_i} 1(z_i \leq 0)^{1 - y_i} \right\} f(z_i | \mu + r_i, 1) dz_i g(r_i|0, \sigma^2) dr_i,
+\end{aligned}
+\end{equation}
+where $f$ is the pdf of the standard logistic distribution and $g$ is the pdf of the standard normal.
+This is ugly. 
+When $y_i = 0$, we have 
+\begin{equation}
+\begin{aligned}
+&\int_{-\infty}^\infty \left\{1(z_i>0)^{y_i} 1(z_i \leq 0)^{1 - y_i} \right\} f(z_i | \mu + r_i, 1) dz_i\\
+&= \int_{-\infty}^0 f(z_i | \mu + r_i, 1) dz_i\\
+&= \frac{1}{1 + \exp(\mu + r_i)}
+\end{aligned}
+\end{equation}
+Then,
+\begin{equation}
+\begin{aligned}
+&\int_{-\infty}^\infty \int_{-\infty}^\infty \left\{1(z_i>0)^{y_i} 1(z_i \leq 0)^{1 - y_i} \right\} f(z_i | \mu + r_i, 1) dz_i g(r_i|0, \sigma^2) dr_i\\
+&= \frac{1}{\sqrt{2\pi\sigma^2}}  \int_{-\infty}^\infty \frac{1}{1 + \exp(\mu + r_i)} \exp\left(- \frac{r_i^2}{2\sigma^2} \right) dr_i
+\end{aligned}
+\end{equation}
+I can't evaluate this integral analytically but eventually the marginal likelihood can be written as 
+\begin{equation}
+\begin{aligned}
+&\left(\frac{1}{\sqrt{2\pi\sigma^2}}\right)^n \left(\int_{-\infty}^\infty \frac{1}{1 + \exp(\mu + r_i)} \exp\left(- \frac{r_i^2}{2\sigma^2} \right) dr_i\right)^{n_0} \\
+&\times \left(\int_{-\infty}^\infty \left(1- \frac{1}{1 + \exp(\mu + r_i)}\right) \exp\left(- \frac{r_i^2}{2\sigma^2} \right) dr_i\right)^{n_1},
+\end{aligned}
+\end{equation}
+where $n_0$ is the number of 0's and $n_1$ is the number of 1's. 
+
+We can work out a numerical example. Assume $n_1 = 60$ and $n_0=40$. Then, the MLE of $\mu$ of the logistic regression without random effects is approximately 0.4 (plogis(0.4) is approximately 0.6). As we increase $\sigma$, we see that our estimate of $\mu$ increases. Here, we show the log marginal likelihood surface:
 <<>>=
-load("../data/logit_t_intercept_only.rda")
+library(emdbook)
+ifun1 <- function(r, mu, sigma) 
+	1/(1 + exp(mu + r)) * exp(-r^2/(2 * sigma^2))
+ifun2 <- function(r, mu, sigma) 
+	(1 - 1/(1 + exp(mu + r))) * exp(-r^2/(2 * sigma^2))
 
-head(simulate_dd)
-@
-
-Then, I fit model (1) and model (2) to this data. First, looking at model (1):
-<<>>=
-load("../analysis/logit_t_intercept_only_logit_gaussian.rda")
-
-ee <- rstan::extract(fit)
-@
-
-Looking at estimates of $\beta$ (intercepts):
-<<>>=
-data.frame(
-	median=apply(ee$beta, 2, median),
-	lwr=apply(ee$beta, 2, quantile, 0.025),
-	upr=apply(ee$beta, 2, quantile, 0.975)
-)
-@
-These are quite different from the $\beta$ that I simulated with because the logit-normal doesn't preserve the marginal logit property. Interpreting each $\beta$ as log-odds will be misleading. For example, these are ``estimated'' odds ratioes (naively assuming that these $\beta$ estiamtes are log-odds):
-<<>>=
-data.frame(
-	median=exp(apply(ee$beta, 2, median)),
-	lwr=exp(apply(ee$beta, 2, quantile, 0.025)),
-	upr=exp(apply(ee$beta, 2, quantile, 0.975))
-)
-@
-The observed odds ratios are quite different:
-<<>>==
-apply(simulate_dd, 2, mean)/(1-apply(simulate_dd, 2, mean))
-@
-Can we at least get correlation right?
-<<>>=
-apply(ee$Omega, 2:3, median)
-apply(ee$Omega, 2:3, quantile, 0.025)
-apply(ee$Omega, 2:3, quantile, 0.975)
-@
-Seems like we're doing OK in terms of estimating the correlation.
-
-Let's look at the estimates from the multivariate logisti regression model:
-<<>>==
-load("../analysis/logit_t_intercept_only_logit_t.rda")
-
-ee <- rstan::extract(fit)
-@
-
-Note that we have to take weighted quantiles this time. Look at estimates of $\beta$:
-<<>>=
-## wquant from King et al.
-wquant <- function (x, weights, probs = c(0.025, 0.975)) {
-    which <- !is.na(weights)
-    x <- x[which]
-    weights <- weights[which]
-
-    if (all(is.na(x)) || length(x) == 0) return(rep(NA, length(probs)))
-
-    idx <- order(x)
-    x <- x[idx]
-    weights <- weights[idx]
-    w <- cumsum(weights)/sum(weights)
-    rval <- approx(w,x,probs,rule=1)
-    rval$y
+llfun <- function(mu, sigma, n1=60, n0=40, log=TRUE) {
+	first <- integrate(ifun1, -200, 200, mu=mu, sigma=sigma)
+	second <- integrate(ifun2, -200, 200, mu=mu, sigma=sigma)
+	
+	ll <- (n0 + n1) * log(1/sqrt(2 * pi * sigma^2)) + 
+		n0 * log(first[[1]]) + n1 * log(second[[1]])
+	
+	if (!log) ll <- exp(ll)
+	
+	ll
 }
 
-data.frame(
-	median=apply(ee$beta, 2, wquant, weights=weights, probs=0.5),
-	lwr=apply(ee$beta, 2, wquant, weights=weights, probs=0.025),
-	upr=apply(ee$beta, 2, wquant, weights=weights, probs=0.975)
-)
-@
-These estimates match with the true values. Moreover, the estimates of odds ratios match with the observed odds (kind of obvious but just checking it):
+muvec <- seq(0.35, 1, by=0.01)
+sigmavec <- exp(seq(log(1), log(10), length.out=100))
 
-<<>>=
-data.frame(
-	median=exp(apply(ee$beta, 2, wquant, weights=weights, probs=0.5)),
-	lwr=exp(apply(ee$beta, 2, wquant, weights=weights, probs=0.025)),
-	upr=exp(apply(ee$beta, 2, wquant, weights=weights, probs=0.975))
-)
+contour(muvec, sigmavec, apply2d(llfun, muvec, sigmavec),
+		xlab=expression(mu),
+		ylab=expression(sigma),
+		main="log (marginal) likelihood surface",
+		levels=c(-67.31, -67.4, -68, 70))
 @
 
-Correlations look reasonable:
-<<>>=
-apply(ee$Omega, 2:3, wquant, weights=weights, probs=0.5)
-apply(ee$Omega, 2:3, wquant, weights=weights, probs=0.025)
-apply(ee$Omega, 2:3, wquant, weights=weights, probs=0.975)
-@
+We can see that there's a relatively flat region starting from $\sigma \approx 0$ and $\mu \approx 0.5$ (see line -67.31).
 
-\section{Improving probit model}
+\subsection{Probit regression}
 
-\cite{o2004bayesian} suggests using a t distribution for approximating the multivariate logit distribution but we can also use the probit model. Instead of using (1), we can rewrite it as 
+Probit regression provides a natural way of defining the underlying correlation for multivariate binomial response:
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n} &= x_n \beta + \epsilon_{n}\\
-\epsilon_{n} &\sim \mathrm{N}(0, \sigma^2 R)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathcal{N}(\pmb \mu, \mathbf R)\\
 \end{aligned}
 \end{equation}
-where $R$ is a correlation matrix and $\sigma^2 = \pi^2/3$. This allows the marginal distribution of $z_n$ to have same variance as a standard logistic distribution. We fit this model to the simulated data above:
-<<>>=
-load("../analysis/logit_t_intercept_only_logit_gaussian2.rda")
-
-ee <- rstan::extract(fit)
-@
-Looking at estimates of $\beta$:
-<<>>=
-data.frame(
-	median=apply(ee$beta, 2, median),
-	lwr=apply(ee$beta, 2, quantile, 0.025),
-	upr=apply(ee$beta, 2, quantile, 0.975)
-)
-@
-This matches the true value much better. Converting these to odds ratios is consistent with the observed odds ratios.
-<<>>=
-data.frame(
-	median=exp(apply(ee$beta, 2, median)),
-	lwr=exp(apply(ee$beta, 2, quantile, 0.025)),
-	upr=exp(apply(ee$beta, 2, quantile, 0.975))
-)
-@
-Correlations look good too:
-
-<<>>=
-apply(ee$Omega, 2:3, median)
-apply(ee$Omega, 2:3, quantile, 0.025)
-apply(ee$Omega, 2:3, quantile, 0.975)
-@
-
-We should be able to apply importance sampling over this to make better inference but I'm not going to try it here...
-
-\section{Mixed model approach}
-
-We can also use the mixed model trick to model multivariate binary outcomes. Then, our model becomes
+In other words,
 \begin{equation}
 \begin{aligned}
-\textrm{logit Pr}(Y_n = y_n) &= x_n \beta + \epsilon_n\\
-\epsilon_n &\sim \mathrm{N}(0, \Sigma)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathcal{N}(\pmb \mu, \mathbf R)\\
 \end{aligned}
 \end{equation}
-I think this model is equivalent (???) to letting 
+which can be rewritten as
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n,k} &\sim \mathcal L(x_{n} \beta_k + \epsilon_n) \\
-\epsilon_n &\sim \mathrm{N}(0, \sigma^2 R),
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \pmb \epsilon_i \\
+\pmb \epsilon_i &\sim \mathcal N(0, \mathbf R).
 \end{aligned}
 \end{equation}
-where $\mathcal L()$ represents the standard logistic distribution and $\sigma^2 = 1$.
-The major ``problem'' with this model is that the underlying distribution of $z$ is overdispersed compared to the standard logistic distribution. 
-This means that the estimates of $\beta$ are not going to represent log-odds.
-So we need a way to shrink the distribution ??? or adjust the posterior using importance sampling.
-Or just use the first two models... Importance sampling is not going to work well because the posterior we get from this is going to be fairly different from the posterior we want.
+This model tries to capture the correlation among the latent ``residuals''.
+Compare this expression with the mixed model approach:
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \mathbf r_i + \pmb \epsilon_i\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R)\\
+\epsilon_{ij} &\sim \mathrm{logistic}(0, 1)
+\end{aligned}
+\end{equation}
+The mixed model approach seeks to decompose the latent residual into two terms. We're going to have less power to detect the correlation structure.
 
-Let's try to think of an approximation, assuming that the second model is equivalent to the first model (I'll check this later...).
-Note that the underlying distribution of $z$ is a compound distribution between a logistic distribution and a normal distribution. Then, the variance of $z$ is given by
-$$
-\mathrm{Var}(Z) = \mathrm{E}_N(\mathrm{Var}_L(Z|\mu + \epsilon)) + \mathrm{Var}_N(\mathrm{E}_L(Z|\mu + \epsilon)) = \frac{\pi^2}{3} + 1 \approx 4.29,
-$$
-which is the sum of variance of the logistic distribution and the underlying normal.
-We can confirm this using a small simulation:
+
+\subsection{Multivariate logistic distribution}
+
+Multivariate logistic distribution suggested by O'Brien allows us to model residual correlations while preserving the marginal logistic distribution:
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \log \left(\frac{F(\mathbf e_i)}{1 - F(\mathbf e_i)} \right) \\
+\end{aligned}
+\end{equation}
+where $\mathbf e_i$ comes from a multivariate distribution with mean 0 and some correlation structure and $F$ is the univariate cumulative distribution function of $\mathbf e_i$. Then, the resulting distribution of $\mathbf z_i$ also has a very similar correlation structure (see code below) as $\mathbf e_i$ and each $z_{ij}$ follows a logistic distribution.
+
 <<>>=
+## very similar correlations
+library(mvtnorm)
+
+corr <- matrix(
+	c(1, .1, .3,
+	  .1, 1, -.3,
+	  .3, -.3, 1),
+	3, 3
+)
+
 set.seed(101)
-var(rlogis(1000000, location=rnorm(1000000)))
+rr <- rmvnorm(10000, sigma=corr)
+cor(rr)
+
+cor(log(pnorm(rr)/(1 - pnorm(rr))))
 @
 
-Then, we can approximate the marginal distribution of $z$ with logistic distribution with scale 
-$$
-s =  \sqrt{1 + \frac{3}{\pi^2}}
-$$
-I think we can use this scale to scale the parameter estimates into the ``correct'' scale but I'm having some computational issues with model (4) even if I fix the variance parameter. It seems like it's harder to estimate correlation matrices... I suspect that the overdispersion makes things harder (unless I'm doing something wrong)...?
+Regardless of what model one decides to use, there should be a way to convert the estimate into a single, consistent scale...? Predict probability from posterior and convert that into odds ratio...? Not sure yet.
 
-\subsection{Checking mixed model ``theory'' for univariate cases}
-
-We can test some ideas on a univariate scale and then move to multivariate scale. 
-First, let's show that (4) and (5) are equivalent using simulations:
-
-<<>>=
-set.seed(101)
-nobs <- 100000
-muvec <- (-4):4
-sapply(muvec, function(x) {
-	rr1 <- rbinom(nobs, 1, plogis(x + rnorm(nobs, 0, 1))) 
-	rr2 <- as.numeric(rlogis(nobs, location=x + rnorm(nobs, 0, 1)) > 0)
-	mean(rr1) - mean(rr2)
-})
-@
-Looks like it works. We also want to know if we can approximately go from this logit-gaussian parameter scale to log odds scale.
-The idea is to approximate this compound logit-gaussian distribution with logistic distribution with different variance. 
-I think we want to find $\hat \beta$ such that:
-\begin{equation}
-E[1 (z > 0)] = \frac{1}{1 + \exp(-\hat \beta)}.
-\end{equation}
-given the underlying distribution of $z$. When $z$ follows a standard logistic distribution, $\hat \beta$ corresponds to the location parameter of the logistic distribution of $z$.
-When $z$ has a non-unit scale, we have
-\begin{equation}
-E[1 (z > 0)] = \frac{1}{1 + \exp(-\mu/s)}
-\end{equation}
-so $\hat \beta = \mu/s$, where $s$ is a scale parameter.
-
-In other words, if we use a mixed model trick where the underlying variance is assumed to be $\sigma^2$, we can transform the parameter estimates by dividing by
-$$
-s =  \sqrt{1 + \frac{3\sigma^2}{\pi^2}}.
-$$
-This should (approximately) get us to the correct log-odds scale. Or we can even incorporate this value into our estimation process and apply importance sampling later (but this approximation seems good enough).
-
-<<>>=
-## mixed model mean probability
-mean(rlogis(10000, 2 + rnorm(10000, sd=1)) > 0)
-## approximation
-plogis(2/sqrt(1 + 3/pi^2))
-
-## same example with different underlying variance of a normal distribution
-## mixed model mean probability
-mean(rlogis(10000, 2 + rnorm(10000, sd=2)) > 0)
-## approximation
-plogis(2/sqrt(1 + 4 * 3/pi^2))
-@
-
-These distributions are slightly different (which explains why the approximation doesn't work exactly)...
-
-<<fig.height=4, fig.width=6>>=
-plot(density(rlogis(10000, 2 + rnorm(10000, sd=2))))
-curve(dlogis(x, 2, scale=sqrt(1 + 4 * 3/pi^2)), add=TRUE, col=2)
-curve(dnorm(x, 2, sd=sqrt(pi^2/3 + 4)), add=TRUE, col=3)
-@
 
 
 \bibliography{logit}

@@ -61,488 +61,236 @@
 
 \maketitle
 
-\section{Probit and multivariate logit model}
+\section{Latent variable notation}
 
-We are interested in modeling multivariate binary outcomes ($n$ observations and $k$ response variables). 
-One way to model this is to use a probit model (this is suggested in the Stan manual; it is different from the mixed model trick but I'll get to that later):
+We are interested in modeling multivariate binomial outcomes. We will write the observed outcome as $\mathbf y_i = (y_{i1}, y_{i2}, \dots, y_{ip})'$, a vector of binary variables. To keep our notations consistent, we will model $\mathbf y_i$ using a latent variable approach:
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n} &= x_n \beta + \epsilon_{n}\\
-\epsilon_{n} &\sim \mathrm{N}(0, R)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathrm{distrib}(\mu, \Sigma^2).
 \end{aligned}
 \end{equation}
-where $R$ is a correlation matrix (with 1's on the diagonals).
-While this is a convenient way of modeling multivariate binary outcomes, its parameters are difficult to interpret. Instead, the multivariate logistic regression model proposed by \cite{o2004bayesian} allows marginal distributions to follow a logistic distribution; the parameters of this model can be easily translated to odds ratio:
+where $\mathbf z_i$ is a vector of continuous variable following a probability distribution with mean $\mu$ and covariance $\Sigma^2$.
+This approach generalizes the univariate logistic regression.
+
+\section{Models}
+
+\subsection{Logistic regression}
+
+First, consider the univariate logistic regression (with intercept only):
+\begin{equation}
+\textrm{logit Pr}(y_i = 1) = \mu.
+\end{equation}
+This is equivalent to writing
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n} &= x_n \beta + \log[F_\nu(e_n)/\{1 - F_\nu(e_n)\}]\\
-e_n &\sim \mathrm{t}(0, \nu, R)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathrm{logistic}(\mu, 1),
 \end{aligned}
 \end{equation}
-where $F_\nu$ is the cumulative distribution function of a univariate $t$ distribution with $\nu$ degrees of freedom and $t(0, \nu, R)$ is a multivariate $t$ distribution with $\nu$ degrees of freedom, mean 0, and covariance $R$.
-Again, to avoid identifiability issues, $R$ is constrained to have 1's on the diagonals (so it's essentially a correlation matrix).
-Sampling directly from this distribution is not trivial (Stan doesn't provide inverse function of CDF of a univariate $t$ distribution); instead, we can use the approximation propsed by \cite{o2004bayesian} and apply importance sampling to get to the correct posterior. 
-Specifically, the distribution of $z_n$ can be approximated by a multivariate $t$-distribution with mean $x_n\beta$, variance $\tilde \sigma^2 = \pi^2 (\nu - 2)/3 \nu$ (``a value chosen to make the variances of the univariate t and logistic distributions equal''), and $\tilde \nu = 7.3$ degrees of freedom (``a value chosen to minimize the integrated squared distance between the univariate t and univariate logistic densities'').
+where $\mathrm{logistic}(\cdot|\mu, s)$ is a logistic \emph{distribution} with location parameter $\mu$ and a scale parameter $s$.
 
-Let's try some examples. We simulate 500 observations using (2) with intercepts only $\beta = (-1, 0, 1)$ and following correlation matrix:
-$$
-R = \begin{pmatrix}
-1 & 0.1 & 0.3\\
-0.1 & 1 & -0.5\\
-0.3 & -0.5 & 1
-\end{pmatrix}.
-$$
-This is what the data looks like:
+One way to extend this model to account for multivariate observation is to use a mixed model approach: 
+\begin{equation}
+\begin{aligned}
+\textrm{logit Pr}(\mathbf Y_i = y_i) &= \pmb \mu + \mathbf r_i\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R),
+\end{aligned}
+\end{equation}
+where $\mathcal N(0, \sigma^2 R)$ is a multivariate normal distribution with covariance $\sigma^2 R$ ($R$ is the correlation matrix). For convenience, we assume that random effects variance $\sigma^2$ is constant among response variables.
+Equivalently, we can write this as
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathrm{logistic}(\pmb \mu + \mathbf r_i, 1)\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R),
+\end{aligned}
+\end{equation}
+which can be further expanded as 
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \mathbf r_i + \pmb \epsilon_i\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R)\\
+\epsilon_{ij} &\sim \mathrm{logistic}(0, 1)
+\end{aligned}
+\end{equation}
+Essentially, we have a continuous latent variable $\mathbf z_i$ which has a mean $\pmb \mu$ and two ``error'' terms: $\mathbf r_i$, which follows a multivariate normal with covariance $\sigma^2 R$, and $\pmb \epsilon_i$, which follows an independent logistic (each marginal distribution is an i.i.d. logistic distribution).
+Due to two levels of uncertainties, it becomes much harder to estimate the correlation structure $R$.
+I don't have a good analytical argument for this but I hope this is somewhat intuitive... I'll compare this with other models later; this might make things slightly clearer.
+
+\subsubsection*{Identifiability of the random effects variance}
+
+It doesn't seem like Jonathan is completely convinced that $\sigma^2$ is not identifiable; he says that it is ``practically'' unidentifiable. Let's try to do some math. Consider a univariate logistic regression with an underlying normal random effects on the mean:
+\begin{equation}
+\begin{aligned}
+y_i &= 1(z_i > 0)\\
+z_i &\sim \mathrm{logistic}(\mu + r_i, 1)\\
+r_i &\sim \mathcal{N}(0, \sigma^2)
+\end{aligned}
+\end{equation}
+Then, the marginal likelihood of this model can be written as 
+\begin{equation}
+\begin{aligned}
+\prod_{i=1}^{n} \int_{-\infty}^\infty \int_{-\infty}^\infty \left\{1(z_i>0)^{y_i} 1(z_i \leq 0)^{1 - y_i} \right\} f(z_i | \mu + r_i, 1) dz_i g(r_i|0, \sigma^2) dr_i,
+\end{aligned}
+\end{equation}
+where $f$ is the pdf of the standard logistic distribution and $g$ is the pdf of the standard normal.
+This is ugly. 
+When $y_i = 0$, we have 
+\begin{equation}
+\begin{aligned}
+&\int_{-\infty}^\infty \left\{1(z_i>0)^{y_i} 1(z_i \leq 0)^{1 - y_i} \right\} f(z_i | \mu + r_i, 1) dz_i\\
+&= \int_{-\infty}^0 f(z_i | \mu + r_i, 1) dz_i\\
+&= \frac{1}{1 + \exp(\mu + r_i)}
+\end{aligned}
+\end{equation}
+Then,
+\begin{equation}
+\begin{aligned}
+&\int_{-\infty}^\infty \int_{-\infty}^\infty \left\{1(z_i>0)^{y_i} 1(z_i \leq 0)^{1 - y_i} \right\} f(z_i | \mu + r_i, 1) dz_i g(r_i|0, \sigma^2) dr_i\\
+&= \frac{1}{\sqrt{2\pi\sigma^2}}  \int_{-\infty}^\infty \frac{1}{1 + \exp(\mu + r_i)} \exp\left(- \frac{r_i^2}{2\sigma^2} \right) dr_i
+\end{aligned}
+\end{equation}
+I can't evaluate this integral analytically but eventually the marginal likelihood can be written as 
+\begin{equation}
+\begin{aligned}
+&\left(\frac{1}{\sqrt{2\pi\sigma^2}}\right)^n \left(\int_{-\infty}^\infty \frac{1}{1 + \exp(\mu + r_i)} \exp\left(- \frac{r_i^2}{2\sigma^2} \right) dr_i\right)^{n_0} \\
+&\times \left(\int_{-\infty}^\infty \left(1- \frac{1}{1 + \exp(\mu + r_i)}\right) \exp\left(- \frac{r_i^2}{2\sigma^2} \right) dr_i\right)^{n_1},
+\end{aligned}
+\end{equation}
+where $n_0$ is the number of 0's and $n_1$ is the number of 1's. 
+
+We can work out a numerical example. Assume $n_1 = 60$ and $n_0=40$. Then, the MLE of $\mu$ of the logistic regression without random effects is approximately 0.4 (plogis(0.4) is approximately 0.6). As we increase $\sigma$, we see that our estimate of $\mu$ increases. Here, we show the log marginal likelihood surface:
 \begin{knitrout}
 \definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
 \begin{alltt}
-\hlkwd{load}\hlstd{(}\hlstr{"../data/logit_t_intercept_only.rda"}\hlstd{)}
+\hlkwd{library}\hlstd{(emdbook)}
+\hlstd{ifun1} \hlkwb{<-} \hlkwa{function}\hlstd{(}\hlkwc{r}\hlstd{,} \hlkwc{mu}\hlstd{,} \hlkwc{sigma}\hlstd{)}
+        \hlnum{1}\hlopt{/}\hlstd{(}\hlnum{1} \hlopt{+} \hlkwd{exp}\hlstd{(mu} \hlopt{+} \hlstd{r))} \hlopt{*} \hlkwd{exp}\hlstd{(}\hlopt{-}\hlstd{r}\hlopt{^}\hlnum{2}\hlopt{/}\hlstd{(}\hlnum{2} \hlopt{*} \hlstd{sigma}\hlopt{^}\hlnum{2}\hlstd{))}
+\hlstd{ifun2} \hlkwb{<-} \hlkwa{function}\hlstd{(}\hlkwc{r}\hlstd{,} \hlkwc{mu}\hlstd{,} \hlkwc{sigma}\hlstd{)}
+        \hlstd{(}\hlnum{1} \hlopt{-} \hlnum{1}\hlopt{/}\hlstd{(}\hlnum{1} \hlopt{+} \hlkwd{exp}\hlstd{(mu} \hlopt{+} \hlstd{r)))} \hlopt{*} \hlkwd{exp}\hlstd{(}\hlopt{-}\hlstd{r}\hlopt{^}\hlnum{2}\hlopt{/}\hlstd{(}\hlnum{2} \hlopt{*} \hlstd{sigma}\hlopt{^}\hlnum{2}\hlstd{))}
 
-\hlkwd{head}\hlstd{(simulate_dd)}
-\end{alltt}
-\begin{verbatim}
-##      V1 V2 V3
-## [1,]  1  1  0
-## [2,]  1  0  1
-## [3,]  1  0  1
-## [4,]  1  1  0
-## [5,]  1  0  0
-## [6,]  1  0  0
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
+\hlstd{llfun} \hlkwb{<-} \hlkwa{function}\hlstd{(}\hlkwc{mu}\hlstd{,} \hlkwc{sigma}\hlstd{,} \hlkwc{n1}\hlstd{=}\hlnum{60}\hlstd{,} \hlkwc{n0}\hlstd{=}\hlnum{40}\hlstd{,} \hlkwc{log}\hlstd{=}\hlnum{TRUE}\hlstd{) \{}
+        \hlstd{first} \hlkwb{<-} \hlkwd{integrate}\hlstd{(ifun1,} \hlopt{-}\hlnum{200}\hlstd{,} \hlnum{200}\hlstd{,} \hlkwc{mu}\hlstd{=mu,} \hlkwc{sigma}\hlstd{=sigma)}
+        \hlstd{second} \hlkwb{<-} \hlkwd{integrate}\hlstd{(ifun2,} \hlopt{-}\hlnum{200}\hlstd{,} \hlnum{200}\hlstd{,} \hlkwc{mu}\hlstd{=mu,} \hlkwc{sigma}\hlstd{=sigma)}
 
-Then, I fit model (1) and model (2) to this data. First, looking at model (1):
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{load}\hlstd{(}\hlstr{"../analysis/logit_t_intercept_only_logit_gaussian.rda"}\hlstd{)}
+        \hlstd{ll} \hlkwb{<-} \hlstd{(n0} \hlopt{+} \hlstd{n1)} \hlopt{*} \hlkwd{log}\hlstd{(}\hlnum{1}\hlopt{/}\hlkwd{sqrt}\hlstd{(}\hlnum{2} \hlopt{*} \hlstd{pi} \hlopt{*} \hlstd{sigma}\hlopt{^}\hlnum{2}\hlstd{))} \hlopt{+}
+                \hlstd{n0} \hlopt{*} \hlkwd{log}\hlstd{(first[[}\hlnum{1}\hlstd{]])} \hlopt{+} \hlstd{n1} \hlopt{*} \hlkwd{log}\hlstd{(second[[}\hlnum{1}\hlstd{]])}
 
-\hlstd{ee} \hlkwb{<-} \hlstd{rstan}\hlopt{::}\hlkwd{extract}\hlstd{(fit)}
-\end{alltt}
-\end{kframe}
-\end{knitrout}
+        \hlkwa{if} \hlstd{(}\hlopt{!}\hlstd{log) ll} \hlkwb{<-} \hlkwd{exp}\hlstd{(ll)}
 
-Looking at estimates of $\beta$ (intercepts):
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{data.frame}\hlstd{(}
-        \hlkwc{median}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, median),}
-        \hlkwc{lwr}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.025}\hlstd{),}
-        \hlkwc{upr}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.975}\hlstd{)}
-\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##         median        lwr        upr
-## 1  0.606912208  0.4954737  0.7326054
-## 2  0.001469309 -0.1093642  0.1080785
-## 3 -0.566471453 -0.6756364 -0.4523101
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-These are quite different from the $\beta$ that I simulated with because the logit-normal doesn't preserve the marginal logit property. Interpreting each $\beta$ as log-odds will be misleading. For example, these are ``estimated'' odds ratioes (naively assuming that these $\beta$ estiamtes are log-odds):
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{data.frame}\hlstd{(}
-        \hlkwc{median}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, median)),}
-        \hlkwc{lwr}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.025}\hlstd{)),}
-        \hlkwc{upr}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.975}\hlstd{))}
-\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##      median       lwr       upr
-## 1 1.8347573 1.6412755 2.0804941
-## 2 1.0014704 0.8964039 1.1141352
-## 3 0.5675244 0.5088325 0.6361569
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-The observed odds ratios are quite different:
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(simulate_dd,} \hlnum{2}\hlstd{, mean)}\hlopt{/}\hlstd{(}\hlnum{1}\hlopt{-}\hlkwd{apply}\hlstd{(simulate_dd,} \hlnum{2}\hlstd{, mean))}
-\end{alltt}
-\begin{verbatim}
-##       V1       V2       V3 
-## 2.731343 1.008032 0.396648
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-Can we at least get correlation right?
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, median)}
-\end{alltt}
-\begin{verbatim}
-##       
-##             [,1]       [,2]       [,3]
-##   [1,] 1.0000000  0.1131334  0.2271666
-##   [2,] 0.1131334  1.0000000 -0.4350445
-##   [3,] 0.2271666 -0.4350445  1.0000000
-\end{verbatim}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, quantile,} \hlnum{0.025}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##               [,1]       [,2]        [,3]
-##   [1,]  1.00000000 -0.0344030  0.08280362
-##   [2,] -0.03440300  1.0000000 -0.55617938
-##   [3,]  0.08280362 -0.5561794  1.00000000
-\end{verbatim}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, quantile,} \hlnum{0.975}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##             [,1]       [,2]       [,3]
-##   [1,] 1.0000000  0.2550047  0.3808753
-##   [2,] 0.2550047  1.0000000 -0.3081267
-##   [3,] 0.3808753 -0.3081267  1.0000000
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-Seems like we're doing OK in terms of estimating the correlation.
-
-Let's look at the estimates from the multivariate logisti regression model:
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{load}\hlstd{(}\hlstr{"../analysis/logit_t_intercept_only_logit_t.rda"}\hlstd{)}
-
-\hlstd{ee} \hlkwb{<-} \hlstd{rstan}\hlopt{::}\hlkwd{extract}\hlstd{(fit)}
-\end{alltt}
-\end{kframe}
-\end{knitrout}
-
-Note that we have to take weighted quantiles this time. Look at estimates of $\beta$:
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlcom{## wquant from King et al.}
-\hlstd{wquant} \hlkwb{<-} \hlkwa{function} \hlstd{(}\hlkwc{x}\hlstd{,} \hlkwc{weights}\hlstd{,} \hlkwc{probs} \hlstd{=} \hlkwd{c}\hlstd{(}\hlnum{0.025}\hlstd{,} \hlnum{0.975}\hlstd{)) \{}
-    \hlstd{which} \hlkwb{<-} \hlopt{!}\hlkwd{is.na}\hlstd{(weights)}
-    \hlstd{x} \hlkwb{<-} \hlstd{x[which]}
-    \hlstd{weights} \hlkwb{<-} \hlstd{weights[which]}
-
-    \hlkwa{if} \hlstd{(}\hlkwd{all}\hlstd{(}\hlkwd{is.na}\hlstd{(x))} \hlopt{||} \hlkwd{length}\hlstd{(x)} \hlopt{==} \hlnum{0}\hlstd{)} \hlkwd{return}\hlstd{(}\hlkwd{rep}\hlstd{(}\hlnum{NA}\hlstd{,} \hlkwd{length}\hlstd{(probs)))}
-
-    \hlstd{idx} \hlkwb{<-} \hlkwd{order}\hlstd{(x)}
-    \hlstd{x} \hlkwb{<-} \hlstd{x[idx]}
-    \hlstd{weights} \hlkwb{<-} \hlstd{weights[idx]}
-    \hlstd{w} \hlkwb{<-} \hlkwd{cumsum}\hlstd{(weights)}\hlopt{/}\hlkwd{sum}\hlstd{(weights)}
-    \hlstd{rval} \hlkwb{<-} \hlkwd{approx}\hlstd{(w,x,probs,}\hlkwc{rule}\hlstd{=}\hlnum{1}\hlstd{)}
-    \hlstd{rval}\hlopt{$}\hlstd{y}
+        \hlstd{ll}
 \hlstd{\}}
 
-\hlkwd{data.frame}\hlstd{(}
-        \hlkwc{median}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.5}\hlstd{),}
-        \hlkwc{lwr}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.025}\hlstd{),}
-        \hlkwc{upr}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.975}\hlstd{)}
-\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##         median        lwr        upr
-## 1  0.995853424  0.8220403  1.2176655
-## 2  0.006185303 -0.1761347  0.1640782
-## 3 -0.921081770 -1.1175128 -0.7324204
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-These estimates match with the true values. Moreover, the estimates of odds ratios match with the observed odds (kind of obvious but just checking it):
+\hlstd{muvec} \hlkwb{<-} \hlkwd{seq}\hlstd{(}\hlnum{0.35}\hlstd{,} \hlnum{1}\hlstd{,} \hlkwc{by}\hlstd{=}\hlnum{0.01}\hlstd{)}
+\hlstd{sigmavec} \hlkwb{<-} \hlkwd{exp}\hlstd{(}\hlkwd{seq}\hlstd{(}\hlkwd{log}\hlstd{(}\hlnum{1}\hlstd{),} \hlkwd{log}\hlstd{(}\hlnum{10}\hlstd{),} \hlkwc{length.out}\hlstd{=}\hlnum{100}\hlstd{))}
 
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{data.frame}\hlstd{(}
-        \hlkwc{median}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.5}\hlstd{)),}
-        \hlkwc{lwr}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.025}\hlstd{)),}
-        \hlkwc{upr}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.975}\hlstd{))}
-\hlstd{)}
+\hlkwd{contour}\hlstd{(muvec, sigmavec,} \hlkwd{apply2d}\hlstd{(llfun, muvec, sigmavec),}
+                \hlkwc{xlab}\hlstd{=}\hlkwd{expression}\hlstd{(mu),}
+                \hlkwc{ylab}\hlstd{=}\hlkwd{expression}\hlstd{(sigma),}
+                \hlkwc{main}\hlstd{=}\hlstr{"log (marginal) likelihood surface"}\hlstd{,}
+                \hlkwc{levels}\hlstd{=}\hlkwd{c}\hlstd{(}\hlopt{-}\hlnum{67.31}\hlstd{,} \hlopt{-}\hlnum{67.4}\hlstd{,} \hlopt{-}\hlnum{68}\hlstd{,} \hlnum{70}\hlstd{))}
 \end{alltt}
-\begin{verbatim}
-##      median       lwr      upr
-## 1 2.7070336 2.2751371 3.379290
-## 2 1.0062045 0.8385050 1.178306
-## 3 0.3980882 0.3270923 0.480744
-\end{verbatim}
 \end{kframe}
+\includegraphics[width=\maxwidth]{figure/unnamed-chunk-1-1} 
+
 \end{knitrout}
 
-Correlations look reasonable:
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.5}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##             [,1]       [,2]       [,3]
-##   [1,] 1.0000000  0.1181755  0.2581493
-##   [2,] 0.1181755  1.0000000 -0.4389358
-##   [3,] 0.2581493 -0.4389358  1.0000000
-\end{verbatim}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.025}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##               [,1]        [,2]       [,3]
-##   [1,]  1.00000000 -0.02844068  0.1227903
-##   [2,] -0.02844068  1.00000000 -0.5390483
-##   [3,]  0.12279029 -0.53904828  1.0000000
-\end{verbatim}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, wquant,} \hlkwc{weights}\hlstd{=weights,} \hlkwc{probs}\hlstd{=}\hlnum{0.975}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##             [,1]       [,2]       [,3]
-##   [1,] 1.0000000  0.2657659  0.4059446
-##   [2,] 0.2657659  1.0000000 -0.3141494
-##   [3,] 0.4059446 -0.3141494  1.0000000
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
+We can see that there's a relatively flat region starting from $\sigma \approx 0$ and $\mu \approx 0.5$ (see line -67.31).
 
-\section{Improving probit model}
+\subsection{Probit regression}
 
-\cite{o2004bayesian} suggests using a t distribution for approximating the multivariate logit distribution but we can also use the probit model. Instead of using (1), we can rewrite it as 
+Probit regression provides a natural way of defining the underlying correlation for multivariate binomial response:
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n} &= x_n \beta + \epsilon_{n}\\
-\epsilon_{n} &\sim \mathrm{N}(0, \sigma^2 R)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathcal{N}(\pmb \mu, \mathbf R)\\
 \end{aligned}
 \end{equation}
-where $R$ is a correlation matrix and $\sigma^2 = \pi^2/3$. This allows the marginal distribution of $z_n$ to have same variance as a standard logistic distribution. We fit this model to the simulated data above:
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{load}\hlstd{(}\hlstr{"../analysis/logit_t_intercept_only_logit_gaussian2.rda"}\hlstd{)}
-
-\hlstd{ee} \hlkwb{<-} \hlstd{rstan}\hlopt{::}\hlkwd{extract}\hlstd{(fit)}
-\end{alltt}
-\end{kframe}
-\end{knitrout}
-Looking at estimates of $\beta$:
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{data.frame}\hlstd{(}
-        \hlkwc{median}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, median),}
-        \hlkwc{lwr}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.025}\hlstd{),}
-        \hlkwc{upr}\hlstd{=}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.975}\hlstd{)}
-\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##        median        lwr        upr
-## 1  1.12086705  0.9278208  1.3546859
-## 2  0.01113124 -0.1854714  0.2043039
-## 3 -1.03712738 -1.2560094 -0.8314504
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-This matches the true value much better. Converting these to odds ratios is consistent with the observed odds ratios.
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{data.frame}\hlstd{(}
-        \hlkwc{median}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, median)),}
-        \hlkwc{lwr}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.025}\hlstd{)),}
-        \hlkwc{upr}\hlstd{=}\hlkwd{exp}\hlstd{(}\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{beta,} \hlnum{2}\hlstd{, quantile,} \hlnum{0.975}\hlstd{))}
-\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##      median       lwr       upr
-## 1 3.0675127 2.5289920 3.8755434
-## 2 1.0111934 0.8307126 1.2266709
-## 3 0.3544715 0.2847882 0.4354173
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-Correlations look good too:
-
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, median)}
-\end{alltt}
-\begin{verbatim}
-##       
-##             [,1]       [,2]       [,3]
-##   [1,] 1.0000000  0.1206049  0.2337311
-##   [2,] 0.1206049  1.0000000 -0.4334244
-##   [3,] 0.2337311 -0.4334244  1.0000000
-\end{verbatim}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, quantile,} \hlnum{0.025}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##               [,1]       [,2]        [,3]
-##   [1,]  1.00000000 -0.0127358  0.07630079
-##   [2,] -0.01273580  1.0000000 -0.55051889
-##   [3,]  0.07630079 -0.5505189  1.00000000
-\end{verbatim}
-\begin{alltt}
-\hlkwd{apply}\hlstd{(ee}\hlopt{$}\hlstd{Omega,} \hlnum{2}\hlopt{:}\hlnum{3}\hlstd{, quantile,} \hlnum{0.975}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-##       
-##             [,1]       [,2]       [,3]
-##   [1,] 1.0000000  0.2513424  0.3790616
-##   [2,] 0.2513424  1.0000000 -0.3140738
-##   [3,] 0.3790616 -0.3140738  1.0000000
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-
-We should be able to apply importance sampling over this to make better inference but I'm not going to try it here...
-
-\section{Mixed model approach}
-
-We can also use the mixed model trick to model multivariate binary outcomes. Then, our model becomes
+In other words,
 \begin{equation}
 \begin{aligned}
-\textrm{logit Pr}(Y_n = y_n) &= x_n \beta + \epsilon_n\\
-\epsilon_n &\sim \mathrm{N}(0, \Sigma)
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &\sim \mathcal{N}(\pmb \mu, \mathbf R)\\
 \end{aligned}
 \end{equation}
-I think this model is equivalent (???) to letting 
+which can be rewritten as
 \begin{equation}
 \begin{aligned}
-y_{n,k} &= 1(z_{n,k} > 0)\\
-z_{n,k} &\sim \mathcal L(x_{n} \beta_k + \epsilon_n) \\
-\epsilon_n &\sim \mathrm{N}(0, \sigma^2 R),
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \pmb \epsilon_i \\
+\pmb \epsilon_i &\sim \mathcal N(0, \mathbf R).
 \end{aligned}
 \end{equation}
-where $\mathcal L()$ represents the standard logistic distribution and $\sigma^2 = 1$.
-The major ``problem'' with this model is that the underlying distribution of $z$ is overdispersed compared to the standard logistic distribution. 
-This means that the estimates of $\beta$ are not going to represent log-odds.
-So we need a way to shrink the distribution ??? or adjust the posterior using importance sampling.
-Or just use the first two models... Importance sampling is not going to work well because the posterior we get from this is going to be fairly different from the posterior we want.
+This model tries to capture the correlation among the latent ``residuals''.
+Compare this expression with the mixed model approach:
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \mathbf r_i + \pmb \epsilon_i\\
+\mathbf r_i &\sim \mathcal{N}(0, \sigma^2 R)\\
+\epsilon_{ij} &\sim \mathrm{logistic}(0, 1)
+\end{aligned}
+\end{equation}
+The mixed model approach seeks to decompose the latent residual into two terms. We're going to have less power to detect the correlation structure.
 
-Let's try to think of an approximation, assuming that the second model is equivalent to the first model (I'll check this later...).
-Note that the underlying distribution of $z$ is a compound distribution between a logistic distribution and a normal distribution. Then, the variance of $z$ is given by
-$$
-\mathrm{Var}(Z) = \mathrm{E}_N(\mathrm{Var}_L(Z|\mu + \epsilon)) + \mathrm{Var}_N(\mathrm{E}_L(Z|\mu + \epsilon)) = \frac{\pi^2}{3} + 1 \approx 4.29,
-$$
-which is the sum of variance of the logistic distribution and the underlying normal.
-We can confirm this using a small simulation:
+
+\subsection{Multivariate logistic distribution}
+
+Multivariate logistic distribution suggested by O'Brien allows us to model residual correlations while preserving the marginal logistic distribution:
+\begin{equation}
+\begin{aligned}
+\mathbf y_i &= 1(\mathbf z_i > 0)\\
+\mathbf z_i &= \pmb \mu + \log \left(\frac{F(\mathbf e_i)}{1 - F(\mathbf e_i)} \right) \\
+\end{aligned}
+\end{equation}
+where $\mathbf e_i$ comes from a multivariate distribution with mean 0 and some correlation structure and $F$ is the univariate cumulative distribution function of $\mathbf e_i$. Then, the resulting distribution of $\mathbf z_i$ also has a very similar correlation structure (see code below) as $\mathbf e_i$ and each $z_{ij}$ follows a logistic distribution.
+
 \begin{knitrout}
 \definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
 \begin{alltt}
+\hlcom{## very similar correlations}
+\hlkwd{library}\hlstd{(mvtnorm)}
+\end{alltt}
+
+
+{\ttfamily\noindent\color{warningcolor}{\#\# Warning: package 'mvtnorm' was built under R version 3.5.2}}
+
+{\ttfamily\noindent\itshape\color{messagecolor}{\#\# \\\#\# Attaching package: 'mvtnorm'}}
+
+{\ttfamily\noindent\itshape\color{messagecolor}{\#\# The following object is masked from 'package:emdbook':\\\#\# \\\#\#\ \ \ \  dmvnorm}}\begin{alltt}
+\hlstd{corr} \hlkwb{<-} \hlkwd{matrix}\hlstd{(}
+        \hlkwd{c}\hlstd{(}\hlnum{1}\hlstd{,} \hlnum{.1}\hlstd{,} \hlnum{.3}\hlstd{,}
+          \hlnum{.1}\hlstd{,} \hlnum{1}\hlstd{,} \hlopt{-}\hlnum{.3}\hlstd{,}
+          \hlnum{.3}\hlstd{,} \hlopt{-}\hlnum{.3}\hlstd{,} \hlnum{1}\hlstd{),}
+        \hlnum{3}\hlstd{,} \hlnum{3}
+\hlstd{)}
+
 \hlkwd{set.seed}\hlstd{(}\hlnum{101}\hlstd{)}
-\hlkwd{var}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{1000000}\hlstd{,} \hlkwc{location}\hlstd{=}\hlkwd{rnorm}\hlstd{(}\hlnum{1000000}\hlstd{)))}
+\hlstd{rr} \hlkwb{<-} \hlkwd{rmvnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sigma}\hlstd{=corr)}
+\hlkwd{cor}\hlstd{(rr)}
 \end{alltt}
 \begin{verbatim}
-## [1] 4.291188
+##            [,1]        [,2]       [,3]
+## [1,] 1.00000000  0.09329252  0.2929604
+## [2,] 0.09329252  1.00000000 -0.3104384
+## [3,] 0.29296044 -0.31043837  1.0000000
+\end{verbatim}
+\begin{alltt}
+\hlkwd{cor}\hlstd{(}\hlkwd{log}\hlstd{(}\hlkwd{pnorm}\hlstd{(rr)}\hlopt{/}\hlstd{(}\hlnum{1} \hlopt{-} \hlkwd{pnorm}\hlstd{(rr))))}
+\end{alltt}
+\begin{verbatim}
+##           [,1]       [,2]       [,3]
+## [1,] 1.0000000  0.0926942  0.2898303
+## [2,] 0.0926942  1.0000000 -0.3088695
+## [3,] 0.2898303 -0.3088695  1.0000000
 \end{verbatim}
 \end{kframe}
 \end{knitrout}
 
-Then, we can approximate the marginal distribution of $z$ with logistic distribution with scale 
-$$
-s =  \sqrt{1 + \frac{3}{\pi^2}}
-$$
-I think we can use this scale to scale the parameter estimates into the ``correct'' scale but I'm having some computational issues with model (4) even if I fix the variance parameter. It seems like it's harder to estimate correlation matrices... I suspect that the overdispersion makes things harder (unless I'm doing something wrong)...?
+Regardless of what model one decides to use, there should be a way to convert the estimate into a single, consistent scale...? Predict probability from posterior and convert that into odds ratio...? Not sure yet.
 
-\subsection{Checking mixed model ``theory'' for univariate cases}
-
-We can test some ideas on a univariate scale and then move to multivariate scale. 
-First, let's show that (4) and (5) are equivalent using simulations:
-
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{set.seed}\hlstd{(}\hlnum{101}\hlstd{)}
-\hlstd{nobs} \hlkwb{<-} \hlnum{100000}
-\hlstd{muvec} \hlkwb{<-} \hlstd{(}\hlopt{-}\hlnum{4}\hlstd{)}\hlopt{:}\hlnum{4}
-\hlkwd{sapply}\hlstd{(muvec,} \hlkwa{function}\hlstd{(}\hlkwc{x}\hlstd{) \{}
-        \hlstd{rr1} \hlkwb{<-} \hlkwd{rbinom}\hlstd{(nobs,} \hlnum{1}\hlstd{,} \hlkwd{plogis}\hlstd{(x} \hlopt{+} \hlkwd{rnorm}\hlstd{(nobs,} \hlnum{0}\hlstd{,} \hlnum{1}\hlstd{)))}
-        \hlstd{rr2} \hlkwb{<-} \hlkwd{as.numeric}\hlstd{(}\hlkwd{rlogis}\hlstd{(nobs,} \hlkwc{location}\hlstd{=x} \hlopt{+} \hlkwd{rnorm}\hlstd{(nobs,} \hlnum{0}\hlstd{,} \hlnum{1}\hlstd{))} \hlopt{>} \hlnum{0}\hlstd{)}
-        \hlkwd{mean}\hlstd{(rr1)} \hlopt{-} \hlkwd{mean}\hlstd{(rr2)}
-\hlstd{\})}
-\end{alltt}
-\begin{verbatim}
-## [1] -0.00005  0.00221  0.00088  0.00459  0.00258 -0.00315 -0.00073  0.00107
-## [9]  0.00042
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-Looks like it works. We also want to know if we can approximately go from this logit-gaussian parameter scale to log odds scale.
-The idea is to approximate this compound logit-gaussian distribution with logistic distribution with different variance. 
-I think we want to find $\hat \beta$ such that:
-\begin{equation}
-E[1 (z > 0)] = \frac{1}{1 + \exp(-\hat \beta)}.
-\end{equation}
-given the underlying distribution of $z$. When $z$ follows a standard logistic distribution, $\hat \beta$ corresponds to the location parameter of the logistic distribution of $z$.
-When $z$ has a non-unit scale, we have
-\begin{equation}
-E[1 (z > 0)] = \frac{1}{1 + \exp(-\mu/s)}
-\end{equation}
-so $\hat \beta = \mu/s$, where $s$ is a scale parameter.
-
-In other words, if we use a mixed model trick where the underlying variance is assumed to be $\sigma^2$, we can transform the parameter estimates by dividing by
-$$
-s =  \sqrt{1 + \frac{3\sigma^2}{\pi^2}}.
-$$
-This should (approximately) get us to the correct log-odds scale. Or we can even incorporate this value into our estimation process and apply importance sampling later (but this approximation seems good enough).
-
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlcom{## mixed model mean probability}
-\hlkwd{mean}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{10000}\hlstd{,} \hlnum{2} \hlopt{+} \hlkwd{rnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlnum{1}\hlstd{))} \hlopt{>} \hlnum{0}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-## [1] 0.8462
-\end{verbatim}
-\begin{alltt}
-\hlcom{## approximation}
-\hlkwd{plogis}\hlstd{(}\hlnum{2}\hlopt{/}\hlkwd{sqrt}\hlstd{(}\hlnum{1} \hlopt{+} \hlnum{3}\hlopt{/}\hlstd{pi}\hlopt{^}\hlnum{2}\hlstd{))}
-\end{alltt}
-\begin{verbatim}
-## [1] 0.8521354
-\end{verbatim}
-\begin{alltt}
-\hlcom{## same example with different underlying variance of a normal distribution}
-\hlcom{## mixed model mean probability}
-\hlkwd{mean}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{10000}\hlstd{,} \hlnum{2} \hlopt{+} \hlkwd{rnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlnum{2}\hlstd{))} \hlopt{>} \hlnum{0}\hlstd{)}
-\end{alltt}
-\begin{verbatim}
-## [1] 0.7767
-\end{verbatim}
-\begin{alltt}
-\hlcom{## approximation}
-\hlkwd{plogis}\hlstd{(}\hlnum{2}\hlopt{/}\hlkwd{sqrt}\hlstd{(}\hlnum{1} \hlopt{+} \hlnum{4} \hlopt{*} \hlnum{3}\hlopt{/}\hlstd{pi}\hlopt{^}\hlnum{2}\hlstd{))}
-\end{alltt}
-\begin{verbatim}
-## [1] 0.793076
-\end{verbatim}
-\end{kframe}
-\end{knitrout}
-
-These distributions are slightly different (which explains why the approximation doesn't work exactly)...
-
-\begin{knitrout}
-\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
-\begin{alltt}
-\hlkwd{plot}\hlstd{(}\hlkwd{density}\hlstd{(}\hlkwd{rlogis}\hlstd{(}\hlnum{10000}\hlstd{,} \hlnum{2} \hlopt{+} \hlkwd{rnorm}\hlstd{(}\hlnum{10000}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlnum{2}\hlstd{))))}
-\hlkwd{curve}\hlstd{(}\hlkwd{dlogis}\hlstd{(x,} \hlnum{2}\hlstd{,} \hlkwc{scale}\hlstd{=}\hlkwd{sqrt}\hlstd{(}\hlnum{1} \hlopt{+} \hlnum{4} \hlopt{*} \hlnum{3}\hlopt{/}\hlstd{pi}\hlopt{^}\hlnum{2}\hlstd{)),} \hlkwc{add}\hlstd{=}\hlnum{TRUE}\hlstd{,} \hlkwc{col}\hlstd{=}\hlnum{2}\hlstd{)}
-\hlkwd{curve}\hlstd{(}\hlkwd{dnorm}\hlstd{(x,} \hlnum{2}\hlstd{,} \hlkwc{sd}\hlstd{=}\hlkwd{sqrt}\hlstd{(pi}\hlopt{^}\hlnum{2}\hlopt{/}\hlnum{3} \hlopt{+} \hlnum{4}\hlstd{)),} \hlkwc{add}\hlstd{=}\hlnum{TRUE}\hlstd{,} \hlkwc{col}\hlstd{=}\hlnum{3}\hlstd{)}
-\end{alltt}
-\end{kframe}
-\includegraphics[width=\maxwidth]{figure/unnamed-chunk-18-1} 
-
-\end{knitrout}
 
 
 \bibliography{logit}
